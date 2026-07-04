@@ -39,6 +39,7 @@ seam remembers and surfaces as 503 only if NO provider accepts the token.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from typing import Awaitable, Callable, Optional, Tuple
 
@@ -51,33 +52,62 @@ from hermes_cli.dashboard_auth.base import ProviderError, TokenPrincipal
 
 _log = logging.getLogger(__name__)
 
-# Exact paths that accept non-interactive bearer-token auth. A route registers
-# itself here at import/startup; the seam only acts on registered paths.
+# Exact paths and compiled patterns that accept non-interactive bearer-token
+# auth. A route registers itself here at import/startup via register_token_route;
+# the seam only acts on registered paths. Paths containing {param} placeholders
+# (FastAPI path-parameter syntax) are compiled to regexes so that real request
+# paths like /api/sessions/abc123/messages can match the template.
 _token_routes: set[str] = set()
+_token_route_patterns: list[re.Pattern] = []  # compiled from {param} templates
 _lock = threading.Lock()
 
 
+def _compile_path_pattern(path: str) -> Optional[re.Pattern]:
+    """Return a compiled regex for a FastAPI-style path template, or None if no {param}."""
+    if "{" not in path:
+        return None
+    # Replace each {param_name} segment with [^/]+ (one non-slash segment).
+    pattern = re.sub(r"\{[^}]+\}", "[^/]+", re.escape(path).replace(r"\{", "{").replace(r"\}", "}"))
+    # re.escape turns / into \/ in some versions; normalise.
+    pattern = pattern.replace("\\/", "/")
+    return re.compile(r"^" + pattern + r"$")
+
+
 def register_token_route(path: str) -> None:
-    """Mark ``path`` (exact match) as token-authable.
+    """Mark ``path`` as token-authable.
+
+    Accepts both exact paths (e.g. ``/api/sessions``) and FastAPI-style path
+    templates with ``{param}`` placeholders (e.g.
+    ``/api/sessions/{session_id}/messages``). Templates are compiled to regexes
+    so that real request paths match at middleware time.
 
     Idempotent. Call at module import / app setup so the seam knows which
     routes to guard. Registering a route does NOT make it public — it makes
     it authenticate by token instead of by session cookie.
     """
+    compiled = _compile_path_pattern(path)
     with _lock:
         _token_routes.add(path)
+        if compiled is not None:
+            # Avoid duplicate patterns on repeated calls.
+            existing = {p.pattern for p in _token_route_patterns}
+            if compiled.pattern not in existing:
+                _token_route_patterns.append(compiled)
 
 
 def is_token_route(path: str) -> bool:
-    """True if ``path`` was registered as token-authable (exact match)."""
+    """True if ``path`` matches a registered token-authable route (exact or pattern)."""
     with _lock:
-        return path in _token_routes
+        if path in _token_routes:
+            return True
+        return any(p.match(path) for p in _token_route_patterns)
 
 
 def clear_token_routes() -> None:
     """Test-only: drop all registered token routes."""
     with _lock:
         _token_routes.clear()
+        _token_route_patterns.clear()
 
 
 def _client_ip(request: Request) -> str:

@@ -1,0 +1,7 @@
+name: read-secret
+version: 1.0.0
+description: "Dashboard auth provider — non-interactive shared-bearer-secret for read-only API access (/api/sessions). Set HERMES_DASHBOARD_READ_SECRET to a >=256-bit url-safe-base64 token to enable bearer-token access for Workspace (or any service caller). Fails CLOSED: a weak/short secret is rejected at registration. No-op when the env var is unset."
+author: NousResearch
+kind: backend
+requires_env:
+  - HERMES_DASHBOARD_READ_SECRET

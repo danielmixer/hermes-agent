@@ -338,3 +338,82 @@ def test_seam_503_on_provider_unreachable():
     )
     resp = _run(token_auth.token_auth_middleware(req, _call_next_ok))
     assert resp.status_code == 503
+
+
+# --------------------------------------------------------------------------
+# Parameterized path-template matching
+# --------------------------------------------------------------------------
+
+
+def test_is_token_route_matches_param_template():
+    token_auth.register_token_route("/api/sessions/{session_id}/messages")
+    assert token_auth.is_token_route("/api/sessions/abc123/messages")
+    assert token_auth.is_token_route("/api/sessions/ff4c631c-6f7e-4324-86ea-50cb4bdf504a/messages")
+
+
+def test_is_token_route_template_does_not_match_extra_segments():
+    token_auth.register_token_route("/api/sessions/{session_id}/messages")
+    # An extra trailing segment should NOT match.
+    assert not token_auth.is_token_route("/api/sessions/abc123/messages/extra")
+
+
+def test_is_token_route_template_does_not_match_empty_segment():
+    token_auth.register_token_route("/api/sessions/{session_id}/messages")
+    # The {session_id} segment must be non-empty.
+    assert not token_auth.is_token_route("/api/sessions//messages")
+
+
+def test_is_token_route_exact_and_template_coexist():
+    token_auth.register_token_route("/api/sessions")
+    token_auth.register_token_route("/api/sessions/{session_id}/messages")
+    assert token_auth.is_token_route("/api/sessions")
+    assert token_auth.is_token_route("/api/sessions/abc123/messages")
+    assert not token_auth.is_token_route("/api/sessions/abc123")  # not registered
+
+
+def test_register_token_route_idempotent_for_templates():
+    token_auth.register_token_route("/api/sessions/{session_id}/messages")
+    token_auth.register_token_route("/api/sessions/{session_id}/messages")
+    # Should not double-register the pattern.
+    with token_auth._lock:
+        count = sum(
+            1 for p in token_auth._token_route_patterns
+            if "/api/sessions/" in p.pattern
+        )
+    assert count == 1
+
+
+def test_seam_accepts_valid_token_on_parameterized_route():
+    register_provider(_TokenProvider(secret="good"))
+    token_auth.register_token_route("/api/sessions/{session_id}/messages")
+    req = _FakeRequest(
+        path="/api/sessions/ff4c631c-6f7e-4324-86ea-50cb4bdf504a/messages",
+        headers={"authorization": "Bearer good"},
+    )
+    resp = _run(token_auth.token_auth_middleware(req, _call_next_ok))
+    assert resp.status_code == 200
+    assert req.state.token_authenticated is True
+
+
+def test_seam_rejects_missing_token_on_parameterized_route():
+    register_provider(_TokenProvider(secret="good"))
+    token_auth.register_token_route("/api/sessions/{session_id}/messages")
+    req = _FakeRequest(
+        path="/api/sessions/abc123/messages",
+        headers={},
+    )
+    resp = _run(token_auth.token_auth_middleware(req, _call_next_ok))
+    assert resp.status_code == 401
+
+
+def test_seam_passthrough_for_unregistered_parameterized_path():
+    register_provider(_TokenProvider(secret="good"))
+    # Only /api/sessions/{session_id}/messages is registered, not /{session_id} itself.
+    token_auth.register_token_route("/api/sessions/{session_id}/messages")
+    req = _FakeRequest(
+        path="/api/sessions/abc123",
+        headers={"authorization": "Bearer good"},
+    )
+    resp = _run(token_auth.token_auth_middleware(req, _call_next_ok))
+    assert resp.status_code == 200
+    assert getattr(req.state, "token_authenticated", False) is False
