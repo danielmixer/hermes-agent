@@ -206,6 +206,21 @@ async def auth_login(request: Request, provider: str, next: str = ""):
             status_code=503,
             detail=f"Provider unreachable: {e}",
         )
+    except NotImplementedError:
+        # Password-only providers (supports_password=True) may stub out the
+        # OAuth methods — there's no redirect flow to start. This route
+        # should only be reached for a redirect-capable provider; treat a
+        # stub hit as a 404 rather than an unhandled 500.
+        audit_log(
+            AuditEvent.LOGIN_FAILURE,
+            provider=provider,
+            reason="unsupported_flow",
+            ip=_client_ip(request),
+        )
+        raise HTTPException(
+            status_code=404,
+            detail=f"Provider does not support the OAuth redirect flow: {provider!r}",
+        )
 
     audit_log(
         AuditEvent.LOGIN_START,

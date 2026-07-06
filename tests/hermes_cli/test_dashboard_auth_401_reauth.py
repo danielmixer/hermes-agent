@@ -406,6 +406,57 @@ class TestAutoSsoRedirect:
         assert r.headers["location"].startswith("/login")
         assert "/auth/login" not in r.headers["location"]
 
+    def test_password_only_provider_never_auto_sso(self, gated_app):
+        """A password-only provider (supports_password=True) may stub out
+        start_login with NotImplementedError — there's no OAuth IDP to
+        bounce through. The sole-provider auto-redirect must not select it;
+        an unauth HTML load falls back to the ordinary /login interstitial
+        (credential form) instead of 302ing into a route that 500s."""
+        from hermes_cli.dashboard_auth import register_provider
+
+        class _StubPasswordProvider(StubAuthProvider):
+            name = "stub-password"
+            display_name = "Stub Password (test only)"
+            supports_password = True
+
+            def start_login(self, *, redirect_uri: str):
+                raise NotImplementedError(
+                    "stub-password is password-only; no OAuth redirect flow"
+                )
+
+        clear_providers()
+        register_provider(_StubPasswordProvider())
+        r = gated_app.get("/sessions", follow_redirects=False)
+        assert r.status_code == 302
+        assert r.headers["location"].startswith("/login")
+        assert "/auth/login" not in r.headers["location"]
+
+    def test_auth_login_on_password_only_provider_returns_404_not_500(
+        self, gated_app,
+    ):
+        """Defense in depth: even a direct hit on /auth/login for a
+        password-only provider must not crash with an unhandled 500 —
+        NotImplementedError from start_login is caught and turned into a
+        clean 404."""
+        from hermes_cli.dashboard_auth import register_provider
+
+        class _StubPasswordProvider(StubAuthProvider):
+            name = "stub-password"
+            display_name = "Stub Password (test only)"
+            supports_password = True
+
+            def start_login(self, *, redirect_uri: str):
+                raise NotImplementedError(
+                    "stub-password is password-only; no OAuth redirect flow"
+                )
+
+        clear_providers()
+        register_provider(_StubPasswordProvider())
+        r = gated_app.get(
+            "/auth/login?provider=stub-password", follow_redirects=False,
+        )
+        assert r.status_code == 404
+
 
 # ---------------------------------------------------------------------------
 # Gate middleware: same-origin next= validation

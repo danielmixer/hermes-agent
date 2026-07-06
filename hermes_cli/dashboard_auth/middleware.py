@@ -182,9 +182,17 @@ def _auto_sso_response(request: Request) -> Response | None:
         # Zero → nothing to redirect to. Two+ → user must choose at /login.
         return None
 
-    from hermes_cli.dashboard_auth.prefix import prefix_from_request
-
     provider = providers[0]
+    if getattr(provider, "supports_password", False):
+        # Password-only providers (see base.DashboardAuthProvider docstring)
+        # may implement start_login as a stub that raises NotImplementedError
+        # — there's no OAuth IDP to bounce through. Auto-SSO only makes sense
+        # for a redirect-capable provider; fall through to the ordinary
+        # /login interstitial (credential form) instead of crashing
+        # /auth/login with an unhandled 500. See dashboard-flap investigation.
+        return None
+
+    from hermes_cli.dashboard_auth.prefix import prefix_from_request
     prefix = prefix_from_request(request)
     next_param = _safe_next_target(request)
     from urllib.parse import quote
