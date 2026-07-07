@@ -1,0 +1,7 @@
+name: read-secret
+version: 1.0.0
+description: "Dashboard auth provider — non-interactive shared-bearer-secret for read-only API access (/api/sessions, /api/skills). Verifies inbound Authorization bearer tokens with constant-time compare; registers token-auth on the configured routes. Fails CLOSED: weak/short/low-entropy secrets (< 256 bits) are rejected at registration and endpoints stay disabled. No-op when HERMES_DASHBOARD_READ_SECRET is unset. Behavioural knobs (scope, min_secret_chars) live under dashboard.read_auth in config.yaml."
+author: NousResearch
+kind: backend
+requires_env:
+  - HERMES_DASHBOARD_READ_SECRET
