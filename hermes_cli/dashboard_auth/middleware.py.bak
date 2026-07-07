@@ -182,30 +182,15 @@ def _auto_sso_response(request: Request) -> Response | None:
         # Zero → nothing to redirect to. Two+ → user must choose at /login.
         return None
 
-    provider = providers[0]
-    if getattr(provider, "supports_password", False):
-        # Password-only providers (see base.DashboardAuthProvider docstring)
-        # may implement start_login as a stub that raises NotImplementedError
-        # — there's no OAuth IDP to bounce through. Auto-SSO only makes sense
-        # for a redirect-capable provider; fall through to the ordinary
-        # /login interstitial (credential form) instead of crashing
-        # /auth/login with an unhandled 500. See dashboard-flap investigation.
-        return None
-
     from hermes_cli.dashboard_auth.prefix import prefix_from_request
+
+    provider = providers[0]
     prefix = prefix_from_request(request)
     next_param = _safe_next_target(request)
     from urllib.parse import quote
-    if getattr(provider, "supports_password", False):
-        # Password-only providers have no OAuth redirect flow — send the
-        # user to the actual login form instead of the OAuth kickoff route.
-        auth_login = f"{prefix}/login"
-        if next_param:
-            auth_login = f"{auth_login}?next={next_param}"
-    else:
-        auth_login = f"{prefix}/auth/login?provider={quote(provider.name, safe='')}"
-        if next_param:
-            auth_login = f"{auth_login}&next={next_param}"
+    auth_login = f"{prefix}/auth/login?provider={quote(provider.name, safe='')}"
+    if next_param:
+        auth_login = f"{auth_login}&next={next_param}"
 
     resp = RedirectResponse(url=auth_login, status_code=302)
     # Drop the one-shot marker so a return trip that's STILL unauthenticated
