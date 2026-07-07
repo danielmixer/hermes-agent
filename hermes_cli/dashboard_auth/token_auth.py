@@ -163,6 +163,15 @@ async def token_auth_middleware(
     if not is_token_route(path):
         return await call_next(request)
 
+    # No bearer token at all — this may be a cookie-authenticated human
+    # session (e.g. Desktop/Workspace OAuth login) rather than a service
+    # caller. Token routes serve BOTH service callers and human sessions,
+    # so fall through to the ordinary cookie/session gate instead of
+    # rejecting outright. A PRESENTED-but-invalid token still fails closed
+    # below.
+    if not extract_bearer_token(request):
+        return await call_next(request)
+
     principal, unreachable = authenticate_token(request)
     if principal is not None:
         request.state.token_principal = principal
